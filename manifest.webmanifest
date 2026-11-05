@@ -1,0 +1,11 @@
+{
+  "name": "محاضر الجلسات الذكية",
+  "short_name": "محاضر الجلسات",
+  "lang": "ar-AE",
+  "dir": "rtl",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7f8",
+  "theme_color": "#12304a",
+  "icons": []
+}
