@@ -117,5 +117,5 @@ root.addEventListener('input', event => {
 });
 root.addEventListener('change', event => { if(event.target.dataset.import && event.target.files[0]) importBackup(event.target.files[0]); });
 
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {}));
 render();
