@@ -77,11 +77,23 @@ function sectionContent() {
 function renderEditor() {
   root.innerHTML = `${renderTopbar()}<main class="main"><div class="workspace"><section class="panel panel-pad">${renderProgress()}${sectionContent()}<div class="actions"><button class="button secondary" data-prev ${section==='session'?'disabled':''}>السابق</button><button class="button" data-next ${section==='review'?'disabled':''}>التالي</button></div></section><aside class="panel preview"><div class="preview-head"><span>المعاينة المباشرة</span><button class="button secondary" data-copy>نسخ</button></div><div class="document">${esc(currentText()) || '<span class="empty">سيظهر نص المحضر هنا أثناء الإجابة.</span>'}</div></aside></div></main><div class="toast"></div>`;
 }
-async function renderArchive() {
-  const records = (await listRecords()).filter(r => `${r.meta?.caseNumber||''} ${r.meta?.title||''}`.includes(search));
-  root.innerHTML = `${renderTopbar()}<main class="main"><section class="panel panel-pad"><h1 class="heading">الأرشيف الشخصي</h1><p class="subheading">المحاضر محفوظة محلياً في هذا المتصفح فقط. احتفظ بنسخة احتياطية مستقلة عند الحاجة.</p><div class="archive-toolbar"><input class="search" style="max-width:360px" value="${esc(search)}" data-search placeholder="ابحث برقم القضية أو العنوان"><button class="button gold" data-nav="new">+ محضر جديد</button><button class="button secondary" data-export-backup>تصدير نسخة احتياطية</button><label class="button secondary">استيراد نسخة<input class="sr-only" type="file" accept=".json,application/json" data-import></label></div>${records.length ? `<div class="records">${records.map(r => `<article class="record"><span class="notice">${esc(r.meta?.caseNumber || 'بلا رقم')}</span><h3>${esc(r.meta?.title || 'محضر جلسة')}</h3><div class="record-meta"><span>تاريخ الجلسة: ${esc(r.meta?.date || 'غير محدد')}</span><span>آخر تعديل: ${new Date(r.updatedAt).toLocaleString('ar-AE')}</span></div><div class="record-actions"><button class="button" data-open="${r.id}">فتح وتعديل</button><button class="button danger" data-delete="${r.id}">حذف</button></div></article>`).join('')}</div>` : '<div class="empty">لا توجد محاضر محفوظة بعد.</div>'}</section></main><div class="toast"></div>`;
+function renderArchiveLoading() {
+  root.innerHTML = `${renderTopbar()}<main class="main"><section class="panel panel-pad"><h1 class="heading">الأرشيف الشخصي</h1><p class="subheading">جارٍ تحميل المحاضر المحفوظة محلياً...</p></section></main>`;
 }
-function render() { archiveMode ? renderArchive() : renderEditor(); }
+function renderArchiveError(error) {
+  console.error('تعذر تحميل الأرشيف المحلي', error);
+  root.innerHTML = `${renderTopbar()}<main class="main"><section class="panel panel-pad"><h1 class="heading">تعذر فتح الأرشيف</h1><p class="subheading">تعذر الوصول إلى التخزين المحلي في هذا المتصفح. لم تُحذف أي بيانات، ويمكنك إعادة المحاولة أو متابعة إنشاء محضر جديد.</p><div class="notice">إذا استمر الخطأ، فعّل أذونات التخزين للموقع أو استخدم «تصدير نسخة احتياطية» من متصفح تمكّن من فتح الأرشيف.</div><div class="button-row" style="margin-top:14px"><button class="button" data-retry-archive>إعادة المحاولة</button><button class="button gold" data-nav="new">+ محضر جديد</button></div></section></main><div class="toast"></div>`;
+}
+async function renderArchive() {
+  renderArchiveLoading();
+  try {
+    const records = (await listRecords()).filter(r => `${r.meta?.caseNumber||''} ${r.meta?.title||''}`.includes(search));
+    root.innerHTML = `${renderTopbar()}<main class="main"><section class="panel panel-pad"><h1 class="heading">الأرشيف الشخصي</h1><p class="subheading">المحاضر محفوظة محلياً في هذا المتصفح فقط. احتفظ بنسخة احتياطية مستقلة عند الحاجة.</p><div class="archive-toolbar"><input class="search" style="max-width:360px" value="${esc(search)}" data-search placeholder="ابحث برقم القضية أو العنوان"><button class="button gold" data-nav="new">+ محضر جديد</button><button class="button secondary" data-export-backup>تصدير نسخة احتياطية</button><label class="button secondary">استيراد نسخة<input class="sr-only" type="file" accept=".json,application/json" data-import></label></div>${records.length ? `<div class="records">${records.map(r => `<article class="record"><span class="notice">${esc(r.meta?.caseNumber || 'بلا رقم')}</span><h3>${esc(r.meta?.title || 'محضر جلسة')}</h3><div class="record-meta"><span>تاريخ الجلسة: ${esc(r.meta?.date || 'غير محدد')}</span><span>آخر تعديل: ${new Date(r.updatedAt).toLocaleString('ar-AE')}</span></div><div class="record-actions"><button class="button" data-open="${r.id}">فتح وتعديل</button><button class="button danger" data-delete="${r.id}">حذف</button></div></article>`).join('')}</div>` : '<div class="empty">لا توجد محاضر محفوظة بعد.</div>'}</section></main><div class="toast"></div>`;
+  } catch (error) {
+    renderArchiveError(error);
+  }
+}
+function render() { archiveMode ? void renderArchive() : renderEditor(); }
 
 function download(name, content, type) { const url=URL.createObjectURL(new Blob([content],{type})); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),500); }
 function exportBackup() { listRecords().then(records => download(`نسخة_محاضر_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify({ version:APP_VERSION, exportedAt:new Date().toISOString(), records },null,2), 'application/json')); }
@@ -91,6 +103,7 @@ root.addEventListener('click', async event => {
   const target=event.target.closest('button,label'); if(!target) return;
   if(target.dataset.nav==='new'){ record=newRecord(); archiveMode=false; section='session'; render(); queueSave(); return; }
   if(target.dataset.nav==='archive'){ archiveMode=true; record=null; render(); return; }
+  if(target.dataset.retryArchive){ renderArchive(); return; }
   if(target.dataset.section){ section=target.dataset.section; render(); return; }
   if(target.dataset.prev){ section=SECTIONS[Math.max(0,SECTIONS.findIndex(s=>s.id===section)-1)].id; render(); return; }
   if(target.dataset.next){ section=SECTIONS[Math.min(SECTIONS.length-1,SECTIONS.findIndex(s=>s.id===section)+1)].id; render(); return; }
