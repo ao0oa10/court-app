@@ -40,6 +40,6 @@ export function representativeTitle(type, gender) {
   if (type === 'agent') return gender === 'F' ? 'وكيلة' : 'وكيل';
   if (type === 'rep') return gender === 'F' ? 'ممثلة' : 'ممثل';
   if (type === 'manager') return gender === 'F' ? 'مديرة' : 'مدير';
-  return 'مستشار إدارة قضايا الحكومة';
+  return gender === 'F' ? 'مستشارة إدارة قضايا الحكومة' : 'مستشار إدارة قضايا الحكومة';
 }
 export function roleLabel(role) { return ROLE_LABELS[role] || role; }

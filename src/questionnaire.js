@@ -17,7 +17,7 @@ export function visibleQuestions(answer = {}) {
 export function resetDependentAnswers(answer, key, value) {
   const next = { ...answer, [key]: value };
   if (key === 'attended' && value === 'no') return { attended: 'no' };
-  if (key === 'repType' && value === 'self') {
+  if (key === 'repType') {
     delete next.repGender; delete next.repName; delete next.govEntity;
   }
   if (key === 'request' && value !== 'custom') delete next.customRequest;
