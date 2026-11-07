@@ -10,14 +10,43 @@ let record = null;
 let section = 'session';
 let archiveMode = true;
 let search = '';
-let saveTimer;
+let saveTimer = null;
+let savePromise = Promise.resolve();
+let archiveRequest = 0;
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[ch]));
 const toast = message => { const el = document.querySelector('.toast'); if (!el) return; el.textContent = message; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2600); };
 const currentText = () => record?.manualText ?? generateDraft(record);
+const queueSave = () => {
+  if (!record) return;
+  const snapshot = structuredClone(record);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    savePromise = savePromise
+      .catch(() => {})
+      .then(() => saveRecord(snapshot))
+      .catch(error => {
+        console.error('تعذر الحفظ المحلي', error);
+        toast('تعذر الحفظ المحلي');
+        return null;
+      });
+  }, 250);
+};
+const flushSave = async () => {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    const snapshot = record ? structuredClone(record) : null;
+    if (snapshot) savePromise = savePromise.catch(() => {}).then(() => saveRecord(snapshot));
+  }
+  await savePromise.catch(error => {
+    console.error('تعذر الحفظ المحلي', error);
+    toast('تعذر الحفظ المحلي');
+  });
+};
 const rerender = () => { render(); queueSave(); };
-const queueSave = () => { if (!record) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => saveRecord(record).catch(() => toast('تعذر الحفظ المحلي')), 250); };
-const update = (fn) => { fn(record); record.manualText = record.manualText; rerender(); };
+const update = (fn) => { fn(record); rerender(); };
 const answerFor = id => record.answers[id] || {};
 const setAnswer = (id, key, value) => update(r => { r.answers[id] = resetDependentAnswers(r.answers[id] || {}, key, value); });
 const options = (values, selected, action) => `<div class="choice-grid">${Object.entries(values).map(([key,label]) => `<button class="choice ${selected === key ? 'selected' : ''}" data-action="${action}" data-value="${esc(key)}">${esc(label)}</button>`).join('')}</div>`;
@@ -84,51 +113,99 @@ function renderArchiveError(error) {
   console.error('تعذر تحميل الأرشيف المحلي', error);
   root.innerHTML = `${renderTopbar()}<main class="main"><section class="panel panel-pad"><h1 class="heading">تعذر فتح الأرشيف</h1><p class="subheading">تعذر الوصول إلى التخزين المحلي في هذا المتصفح. لم تُحذف أي بيانات، ويمكنك إعادة المحاولة أو متابعة إنشاء محضر جديد.</p><div class="notice">إذا استمر الخطأ، فعّل أذونات التخزين للموقع أو استخدم «تصدير نسخة احتياطية» من متصفح تمكّن من فتح الأرشيف.</div><div class="button-row" style="margin-top:14px"><button class="button" data-retry-archive>إعادة المحاولة</button><button class="button gold" data-nav="new">+ محضر جديد</button></div></section></main><div class="toast"></div>`;
 }
-async function renderArchive() {
-  renderArchiveLoading();
-  try {
-    const records = (await listRecords()).filter(r => `${r.meta?.caseNumber||''} ${r.meta?.title||''}`.includes(search));
-    root.innerHTML = `${renderTopbar()}<main class="main"><section class="panel panel-pad"><h1 class="heading">الأرشيف الشخصي</h1><p class="subheading">المحاضر محفوظة محلياً في هذا المتصفح فقط. احتفظ بنسخة احتياطية مستقلة عند الحاجة.</p><div class="archive-toolbar"><input class="search" style="max-width:360px" value="${esc(search)}" data-search placeholder="ابحث برقم القضية أو العنوان"><button class="button gold" data-nav="new">+ محضر جديد</button><button class="button secondary" data-export-backup>تصدير نسخة احتياطية</button><label class="button secondary">استيراد نسخة<input class="sr-only" type="file" accept=".json,application/json" data-import></label></div>${records.length ? `<div class="records">${records.map(r => `<article class="record"><span class="notice">${esc(r.meta?.caseNumber || 'بلا رقم')}</span><h3>${esc(r.meta?.title || 'محضر جلسة')}</h3><div class="record-meta"><span>تاريخ الجلسة: ${esc(r.meta?.date || 'غير محدد')}</span><span>آخر تعديل: ${new Date(r.updatedAt).toLocaleString('ar-AE')}</span></div><div class="record-actions"><button class="button" data-open="${r.id}">فتح وتعديل</button><button class="button danger" data-delete="${r.id}">حذف</button></div></article>`).join('')}</div>` : '<div class="empty">لا توجد محاضر محفوظة بعد.</div>'}</section></main><div class="toast"></div>`;
-  } catch (error) {
-    renderArchiveError(error);
-  }
+async function renderArchive(restoreSearchFocus = false) {
+    const requestId = ++archiveRequest;
+    renderArchiveLoading();
+    try {
+      const records = (await listRecords()).filter(r => `${r.meta?.caseNumber||''} ${r.meta?.title||''}`.includes(search));
+      if (requestId !== archiveRequest) return;
+      root.innerHTML = `${renderTopbar()}<main class="main"><section class="panel panel-pad"><h1 class="heading">الأرشيف الشخصي</h1><p class="subheading">المحاضر محفوظة محلياً في هذا المتصفح فقط. احتفظ بنسخة احتياطية مستقلة عند الحاجة.</p><div class="archive-toolbar"><input class="search" style="max-width:360px" value="${esc(search)}" data-search placeholder="ابحث برقم القضية أو العنوان"><button class="button gold" data-nav="new">+ محضر جديد</button><button class="button secondary" data-export-backup>تصدير نسخة احتياطية</button><label class="button secondary">استيراد نسخة<input class="sr-only" type="file" accept=".json,application/json" data-import></label></div>${records.length ? `<div class="records">${records.map(r => `<article class="record"><span class="notice">${esc(r.meta?.caseNumber || 'بلا رقم')}</span><h3>${esc(r.meta?.title || 'محضر جلسة')}</h3><div class="record-meta"><span>تاريخ الجلسة: ${esc(r.meta?.date || 'غير محدد')}</span><span>آخر تعديل: ${new Date(r.updatedAt).toLocaleString('ar-AE')}</span></div><div class="record-actions"><button class="button" data-open="${r.id}">فتح وتعديل</button><button class="button danger" data-delete="${r.id}">حذف</button></div></article>`).join('')}</div>` : '<div class="empty">لا توجد محاضر محفوظة بعد.</div>'}</section></main><div class="toast"></div>`;
+      const searchInput = root.querySelector('[data-search]');
+      if (restoreSearchFocus && searchInput) {
+        searchInput.focus();
+        searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+      }
+    } catch (error) {
+      renderArchiveError(error);
+    }
 }
 function render() { archiveMode ? void renderArchive() : renderEditor(); }
 
 function download(name, content, type) { const url=URL.createObjectURL(new Blob([content],{type})); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),500); }
-function exportBackup() { listRecords().then(records => download(`نسخة_محاضر_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify({ version:APP_VERSION, exportedAt:new Date().toISOString(), records },null,2), 'application/json')); }
-function importBackup(file) { const reader=new FileReader(); reader.onload=async()=>{ try { const data=JSON.parse(reader.result); const records=Array.isArray(data)?data:data.records; if(!Array.isArray(records)) throw new Error(); const existing=new Set((await listRecords()).map(r=>r.id)); let added=0; for(const item of records) if(item?.id && item?.parties && !existing.has(item.id)){ await saveRecord(item); added++; } toast(`تم استيراد ${added} محضر`); render(); } catch { toast('ملف النسخة الاحتياطية غير صالح'); } }; reader.readAsText(file); }
+async function exportBackup() {
+  await flushSave();
+  try {
+    const records = await listRecords();
+    download(`نسخة_محاضر_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify({ version:APP_VERSION, exportedAt:new Date().toISOString(), records },null,2), 'application/json');
+    toast('تم تصدير النسخة الاحتياطية');
+  } catch (error) {
+    console.error('تعذر تصدير النسخة الاحتياطية', error);
+    toast('تعذر تصدير النسخة الاحتياطية');
+  }
+}
+function importBackup(file) {
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const records = Array.isArray(data) ? data : data.records;
+      if (!Array.isArray(records)) throw new Error('records');
+      const existing = new Set((await listRecords()).map(item => item.id));
+      const imported = new Set();
+      let added = 0;
+      for (const item of records) {
+        if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !Array.isArray(item.parties) || existing.has(item.id) || imported.has(item.id)) continue;
+        await saveRecord(item);
+        imported.add(item.id);
+        added++;
+      }
+      toast(`تم استيراد ${added} محضر`);
+      render();
+    } catch (error) {
+      toast('ملف النسخة الاحتياطية غير صالح');
+    }
+  };
+  reader.onerror = () => toast('تعذر قراءة ملف النسخة الاحتياطية');
+  reader.readAsText(file);
+}
 
 root.addEventListener('click', async event => {
   const target=event.target.closest('button,label'); if(!target) return;
-  if(target.dataset.nav==='new'){ record=newRecord(); archiveMode=false; section='session'; render(); queueSave(); return; }
-  if(target.dataset.nav==='archive'){ archiveMode=true; record=null; render(); return; }
-  if(target.dataset.retryArchive){ renderArchive(); return; }
-  if(target.dataset.section){ section=target.dataset.section; render(); return; }
-  if(target.dataset.prev){ section=SECTIONS[Math.max(0,SECTIONS.findIndex(s=>s.id===section)-1)].id; render(); return; }
-  if(target.dataset.next){ section=SECTIONS[Math.min(SECTIONS.length-1,SECTIONS.findIndex(s=>s.id===section)+1)].id; render(); return; }
-  if(target.dataset.action){ const [kind,id,key]=target.dataset.action.split(':'); if(kind==='answer') setAnswer(id,key,target.dataset.value); if(kind==='party') update(r=>{r.parties.find(p=>p.id===id)[key]=target.dataset.value;}); return; }
-  if(target.dataset.addParty){ update(r=>{ const same=r.parties.filter(p=>p.role===target.dataset.addParty); r.parties.push(newParty(target.dataset.addParty,(Math.max(0,...same.map(p=>Number(p.order)||0))+1))); }); return; }
-  if(target.dataset.removeParty){ update(r=>{r.parties=r.parties.filter(p=>p.id!==target.dataset.removeParty); delete r.answers[target.dataset.removeParty];}); return; }
-  if(target.dataset.open){ record=await getRecord(target.dataset.open); archiveMode=false; section='session'; render(); return; }
-  if(target.dataset.delete){ if(confirm('هل تريد حذف هذا المحضر نهائياً؟')){ await removeRecord(target.dataset.delete); toast('تم حذف المحضر'); renderArchive(); } return; }
-  if(target.dataset.copy){ navigator.clipboard?.writeText(currentText()).then(()=>toast('تم نسخ النص')); return; }
-  if(target.dataset.regenerate){ record.manualText=null; rerender(); toast('تمت إعادة التوليد'); return; }
-  if(target.dataset.download){ const text=currentText(); if(target.dataset.download==='txt') download('محضر_جلسة.txt',text,'text/plain;charset=utf-8'); else download('محضر_جلسة.doc',`<html dir="rtl"><meta charset="utf-8"><body style="direction:rtl;font-family:Arial;white-space:pre-wrap">${esc(text)}</body></html>`,'application/msword'); toast('تم تجهيز الملف'); return; }
-  if(target.dataset.print){ window.print(); return; }
-  if(target.dataset.exportBackup){ exportBackup(); return; }
+  if(target.dataset.nav !== undefined && target.dataset.nav==='new'){ await flushSave(); record=newRecord(); archiveMode=false; section='session'; render(); queueSave(); return; }
+  if(target.dataset.nav !== undefined && target.dataset.nav==='archive'){ await flushSave(); archiveMode=true; record=null; render(); return; }
+  if(target.dataset.retryArchive !== undefined){ renderArchive(); return; }
+  if(target.dataset.section !== undefined){ section=target.dataset.section; render(); return; }
+  if(target.dataset.prev !== undefined){ section=SECTIONS[Math.max(0,SECTIONS.findIndex(s=>s.id===section)-1)].id; render(); return; }
+  if(target.dataset.next !== undefined){ section=SECTIONS[Math.min(SECTIONS.length-1,SECTIONS.findIndex(s=>s.id===section)+1)].id; render(); return; }
+  if(target.dataset.action !== undefined){ const [kind,id,key]=target.dataset.action.split(':'); if(kind==='answer') setAnswer(id,key,target.dataset.value); if(kind==='party') update(r=>{r.parties.find(p=>p.id===id)[key]=target.dataset.value;}); return; }
+  if(target.dataset.addParty !== undefined){ update(r=>{ const same=r.parties.filter(p=>p.role===target.dataset.addParty); r.parties.push(newParty(target.dataset.addParty,(Math.max(0,...same.map(p=>Number(p.order)||0))+1))); }); return; }
+  if(target.dataset.removeParty !== undefined){ update(r=>{r.parties=r.parties.filter(p=>p.id!==target.dataset.removeParty); delete r.answers[target.dataset.removeParty];}); return; }
+  if(target.dataset.open !== undefined){ await flushSave(); record=await getRecord(target.dataset.open); archiveMode=false; section='session'; render(); return; }
+  if(target.dataset.delete !== undefined){ if(confirm('هل تريد حذف هذا المحضر نهائياً؟')){ await removeRecord(target.dataset.delete); toast('تم حذف المحضر'); renderArchive(); } return; }
+  if(target.dataset.copy !== undefined){ try { await navigator.clipboard?.writeText(currentText()); toast('تم نسخ النص'); } catch (error) { console.error('تعذر نسخ النص', error); toast('تعذر نسخ النص'); } return; }
+  if(target.dataset.regenerate !== undefined){ record.manualText=null; rerender(); toast('تمت إعادة التوليد'); return; }
+  if(target.dataset.download !== undefined){ const text=currentText(); if(target.dataset.download==='txt') download('محضر_جلسة.txt',text,'text/plain;charset=utf-8'); else download('محضر_جلسة.doc',`<html dir="rtl"><meta charset="utf-8"><body style="direction:rtl;font-family:Arial;white-space:pre-wrap">${esc(text)}</body></html>`,'application/msword'); toast('تم تجهيز الملف'); return; }
+  if(target.dataset.print !== undefined){ window.print(); return; }
+  if(target.dataset.exportBackup !== undefined){ await exportBackup(); return; }
 });
 root.addEventListener('input', event => {
   const el=event.target;
-  if(el.dataset.search !== undefined){ search=el.value; renderArchive(); return; }
+  if(el.dataset.search !== undefined){ search=el.value; renderArchive(true); return; }
   if(el.dataset.manualText !== undefined){ record.manualText=el.value; queueSave(); const doc=document.querySelector('.document'); if(doc) doc.textContent=el.value; return; }
-  if(!el.dataset.input) return;
-  const [kind,id,key]=el.dataset.input.split(':');
-  if(kind==='meta') update(r=>{r.meta[key]=el.value;});
-  if(kind==='party') update(r=>{r.parties.find(p=>p.id===id)[key]=el.value;});
-  if(kind==='answer') setAnswer(id,key,el.value);
+  if(el.dataset.input === undefined) return;
+  if (el.dataset.input.startsWith('meta.')) {
+    record.meta[el.dataset.input.slice(5)] = el.value;
+    queueSave();
+    return;
+  }
+  const parts = el.dataset.input.split(':');
+  const kind = parts[0];
+  const id = parts[1];
+  const key = parts[2];
+  if(kind==='party') { record.parties.find(p=>p.id===id)[key]=el.value; queueSave(); }
+  if(kind==='answer') { record.answers[id]=resetDependentAnswers(record.answers[id] || {}, key, el.value); queueSave(); }
 });
-root.addEventListener('change', event => { if(event.target.dataset.import && event.target.files[0]) importBackup(event.target.files[0]); });
+root.addEventListener('change', event => { if(event.target.dataset.import !== undefined && event.target.files[0]) importBackup(event.target.files[0]); });
 
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {}));
 render();

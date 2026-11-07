@@ -24,3 +24,13 @@ test('يدعم المثنى في الرفع والنصب', () => {
   assert.equal(partyBaseName('plaintiff','M','D',true), 'المدعيين');
   assert.equal(partyName({role:'defendant',gender:'M',count:'D',order:0}), 'المدعى عليهما');
 });
+test('يظهر اسم الطرف في الصياغة دون تغيير المسمى القانوني', () => {
+  const p = { ...party('1', 'plaintiff'), name: 'شركة النور' };
+  const text = generateDraft({ parties:[p], answers:{1:{attended:'yes',repType:'self'}} });
+  assert.match(text, /المدعي "شركة النور"/);
+});
+test('يصوغ المستشارة الحكومية المؤنثة بصيغة المؤنث', () => {
+  const p = party('1', 'plaintiff');
+  const text = generateDraft({ parties:[p], answers:{1:{attended:'yes',repType:'gov',repGender:'F',repName:'سارة'}}});
+  assert.match(text, /حضرت مستشارة إدارة قضايا الحكومة/);
+});
